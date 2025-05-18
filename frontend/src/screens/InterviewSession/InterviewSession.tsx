@@ -22,6 +22,8 @@ export const InterviewSession = (): JSX.Element => {
   const [currentAudio, setCurrentAudio] = useState<HTMLAudioElement | null>(null);
   const [isGeneratingSpeech, setIsGeneratingSpeech] = useState(false);
   
+  const BACKEND_URL = import.meta.env.VITE_BACKEND_URL || "http://localhost:3001";
+
   // Refs for audio recording
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const audioChunksRef = useRef<Blob[]>([]);
@@ -87,7 +89,7 @@ export const InterviewSession = (): JSX.Element => {
       formData.append("audio", m4aBlob, "recording.m4a");
 
       // Send to backend for Whisper processing
-      const response = await fetch("http://localhost:3001/api/process-audio", {
+      const response = await fetch(`${BACKEND_URL}/api/process-audio`, {
         method: "POST",
         body: formData,
       });
@@ -163,7 +165,7 @@ export const InterviewSession = (): JSX.Element => {
   const getAIResponse = async (userMessage: string) => {
     setIsSending(true);
     try {
-      const response = await fetch("http://localhost:3001/api/get-ai-response", {
+      const response = await fetch(`${BACKEND_URL}/api/get-ai-response`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ message: userMessage }),
@@ -184,7 +186,7 @@ export const InterviewSession = (): JSX.Element => {
   const generateSpeech = async (text: string) => {
     setIsGeneratingSpeech(true);
     try {
-      const response = await fetch("http://localhost:3001/api/generate-speech", {
+      const response = await fetch(`${BACKEND_URL}/api/generate-speech`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ text }),
