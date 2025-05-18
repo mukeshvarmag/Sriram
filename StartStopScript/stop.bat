@@ -1,0 +1,6 @@
+@echo off
+echo Stopping Flask (python) server...
+taskkill /IM python.exe /F
+echo Stopping React (npm) server...
+taskkill /IM node.exe /F
+echo All servers stopped.
