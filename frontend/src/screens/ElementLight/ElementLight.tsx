@@ -6,11 +6,18 @@ import { Card, CardContent } from "../../components/ui/card";
 import { useNavigate } from "react-router-dom";
 import { useAuth } from "../../lib/AuthContext";
 import { Header } from "../../components/Header";
+import { useEffect } from "react";
 
 export const ElementLight = (): JSX.Element => {
   const navigate = useNavigate();
   const { user, signInWithGoogle, logout } = useAuth();
-  
+
+  useEffect(() => {
+    if (user) {
+      navigate("/onboarding");
+    }
+  }, [user]);
+
   // Feature cards data
   const features = [
     {
