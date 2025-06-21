@@ -1,176 +1,100 @@
+# Placeholder for LiveKit-integrated real-time voice assistant backend
+# (Python-based starter with Whisper + GPT + pyttsx3 + WebRTC signaling skeleton)
+
+# NOTE: This assumes you're using LiveKit client SDK in the frontend (e.g., React)
+# and a LiveKit server/cloud instance is available.
+
 import asyncio
 import json
 import os
-import logging
-from io import BytesIO
-from typing import List, Dict
-
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect
-from dotenv import load_dotenv
 from faster_whisper import WhisperModel
-import azure.cognitiveservices.speech as speechsdk
 from openai import OpenAI
-import hashlib
+import pyttsx3
+import websockets
+from dotenv import load_dotenv
 
-# --- Load environment variables ---
+# Load environment variables
 load_dotenv()
-AZURE_KEY = os.getenv("AZURE_SPEECH_KEY")
-AZURE_REGION = os.getenv("AZURE_REGION")
 OPENAI_KEY = os.getenv("OPENAI_API_KEY")
+FORCE_CPU = os.getenv("FORCE_CPU") == "1"
 
-# --- Configure logging ---
-os.makedirs("logs", exist_ok=True)
-logging.basicConfig(
-    filename="logs/app.log",
-    level=logging.INFO,
-    format="%(asctime)s %(levelname)s %(message)s"
-)
-key_hash = hashlib.sha256(OPENAI_KEY.encode()).hexdigest()[:8] if OPENAI_KEY else "NO_KEY"
-logging.info(f"OpenAI API Key Loaded (hash): {key_hash}")
-
-# --- Initialize FastAPI & Services ---
-app = FastAPI()
-whisper_model = WhisperModel("base", compute_type="int8", device="cuda" if os.environ.get("FORCE_CPU") != "1" else "cpu")
+# Initialize GPT and Whisper
+device = "cpu" if FORCE_CPU else "cuda"
+whisper_model = WhisperModel("base", compute_type="int8", device=device)
 client = OpenAI(api_key=OPENAI_KEY)
+tts = pyttsx3.init()
 
-# --- Conversation memory for context ---
-class ConversationManager:
-    def __init__(self):
-        self.messages: List[Dict[str, str]] = []
+# Simulated voice assistant pipeline using WebSocket
+connected_clients = set()
 
-    def add_message(self, role: str, content: str):
-        self.messages.append({"role": role, "content": content})
-
-    def get_messages(self) -> List[Dict[str, str]]:
-        return self.messages.copy()
-
-    def clear(self):
-        self.messages.clear()
-
-# --- Azure TTS Streaming ---
-async def tts_stream(text: str, voice: str = "en-US-JennyNeural"):
+async def process_audio_and_respond(websocket, audio_bytes):
     try:
-        speech_config = speechsdk.SpeechConfig(subscription=AZURE_KEY, region=AZURE_REGION)
-        speech_config.speech_synthesis_voice_name = voice
-        stream = speechsdk.audio.PullAudioOutputStream.create_pull_stream()
-        audio_config = speechsdk.audio.AudioOutputConfig(stream=stream)
-        synthesizer = speechsdk.SpeechSynthesizer(speech_config, audio_config)
+        import numpy as np
+        import soundfile as sf
+        from io import BytesIO
 
-        done = asyncio.Event()
-        synthesizer.synthesis_completed.connect(lambda evt: done.set())
+        audio_np = np.frombuffer(audio_bytes, dtype=np.int16)
+        wav_io = BytesIO()
+        sf.write(wav_io, audio_np, 16000, format='WAV', subtype='PCM_16')
+        wav_io.seek(0)
 
-        result_future = synthesizer.speak_text_async(text)
-        result_future.get()
+        segments, _ = whisper_model.transcribe(wav_io, beam_size=1, language="en")
+        segments = list(segments)
+        if not segments:
+            await websocket.send(json.dumps({"type": "error", "data": "No speech detected."}))
+            return
 
-        while not done.is_set():
-            chunk = await asyncio.to_thread(stream.read, 4096)
-            if chunk:
-                yield chunk
-            await asyncio.sleep(0.01)
+        full_text = " ".join([seg.text.strip() for seg in segments])
+        await websocket.send(json.dumps({"type": "transcript", "data": full_text}))
 
-        stream.close()
-        logging.info("TTS stream completed.")
+        messages = [
+            {"role": "system", "content": "You are a helpful AI interviewer."},
+            {"role": "user", "content": full_text}
+        ]
+        assistant_response = ""
+        stream = client.chat.completions.create(
+            model="gpt-4",
+            messages=messages,
+            stream=True
+        )
+        for part in stream:
+            if part.choices:
+                delta = part.choices[0].delta.get("content", "")
+                if delta:
+                    assistant_response += delta
+                    await websocket.send(json.dumps({"type": "gpt", "data": delta}))
+
+        # Speak using pyttsx3 (local only)
+        tts.say(assistant_response)
+        tts.runAndWait()
+
     except Exception as e:
-        logging.error(f"TTS Streaming failed: {str(e)}")
-        raise
+        await websocket.send(json.dumps({"type": "error", "data": f"Processing error: {str(e)}"}))
 
-# --- WebSocket Streaming Handler ---
-@app.websocket("/ws/audio")
-async def websocket_endpoint(websocket: WebSocket):
-    await websocket.accept()
-    logging.info("WebSocket connected")
+
+async def handler(websocket):
+    connected_clients.add(websocket)
+    print("Client connected")
     buffer = b""
-    conversation = ConversationManager()
-    voice = "en-US-JennyNeural"  # Default
-
     try:
-        while True:
-            try:
-                data = await websocket.receive()
-            except RuntimeError as e:
-                logging.error(f"Fatal WebSocket error: {str(e)}")
-                break
-
-            # Init/Control messages
-            if "text" in data:
-                try:
-                    parsed = json.loads(data["text"])
-                    if parsed.get("type") == "init":
-                        voice = parsed.get("voice", "en-US-JennyNeural")
-                        await websocket.send_text(json.dumps({"type": "ack", "data": "ready"}))
-                        logging.info(f"Initialized voice: {voice}")
-                        continue
-                    elif parsed.get("type") == "ping":
-                        await websocket.send_text(json.dumps({"type": "pong"}))
-                        continue
-                except Exception as e:
-                    logging.warning(f"Ignored non-init text: {e}")
-                    continue
-
-            # Audio bytes
-            elif "bytes" in data:
-                buffer += data["bytes"]
-
-            # Process when audio buffer is large enough (~1s @ 16kHz)
-            if len(buffer) >= 32000:
-                audio_io = BytesIO(bytes(buffer))
-                buffer = b""
-
-                try:
-                    segments, _ = whisper_model.transcribe(audio_io, beam_size=1, language="en")
-                    for segment in segments:
-                        text = segment.text.strip()
-                        if not text:
-                            continue
-
-                        await websocket.send_text(json.dumps({"type": "transcript", "data": text}))
-                        logging.info(f"Transcript: {text}")
-                        conversation.add_message("user", text)
-
-                        # GPT Streaming
-                        assistant_response = ""
-                        try:
-                            stream = client.chat.completions.create(
-                                model="gpt-4",
-                                messages=conversation.get_messages(),
-                                stream=True
-                            )
-                            for part in stream:
-                                if part.choices:
-                                    delta = part.choices[0].delta.get("content", "")
-                                    if delta:
-                                        assistant_response += delta
-                                        await websocket.send_text(json.dumps({
-                                            "type": "gpt",
-                                            "data": delta
-                                        }))
-                            logging.info(f"GPT-4 Response: {assistant_response[:100]}...")
-                            conversation.add_message("assistant", assistant_response)
-
-                            # Stream TTS
-                            async for audio_chunk in tts_stream(assistant_response, voice):
-                                await websocket.send_bytes(audio_chunk)
-
-                        except Exception as e:
-                            logging.error(f"GPT-4 Error: {str(e)}")
-                            await websocket.send_text(json.dumps({
-                                "type": "error",
-                                "data": f"GPT-4 error: {str(e)}"
-                            }))
-                except Exception as e:
-                    logging.error(f"Whisper error: {str(e)}")
-                    await websocket.send_text(json.dumps({
-                        "type": "error",
-                        "data": f"Transcription error: {str(e)}"
-                    }))
-
-    except WebSocketDisconnect:
-        logging.info("WebSocket disconnected.")
-    except Exception as e:
-        logging.error(f"Fatal WebSocket error: {str(e)}")
-        await websocket.send_text(json.dumps({
-            "type": "error",
-            "data": f"Unexpected server error: {str(e)}"
-        }))
+        async for message in websocket:
+            if isinstance(message, bytes):
+                buffer += message
+            elif isinstance(message, str):
+                data = json.loads(message)
+                if data.get("type") == "flush":
+                    await process_audio_and_respond(websocket, buffer)
+                    buffer = b""
+    except websockets.exceptions.ConnectionClosed:
+        print("Client disconnected")
     finally:
-        conversation.clear()
+        connected_clients.remove(websocket)
+
+
+async def main():
+    async with websockets.serve(handler, "localhost", 8765, max_size=None):
+        print("WebSocket server running at ws://localhost:8765")
+        await asyncio.Future()  # run forever
+
+if __name__ == "__main__":
+    asyncio.run(main())
