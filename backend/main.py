@@ -24,25 +24,13 @@ app.add_middleware(
 
 # Logging setup
 LOG_DIR = os.path.join(os.path.dirname(__file__), 'logs')
-ARCHIVE_DIR = os.path.join(LOG_DIR, 'archived')
 os.makedirs(LOG_DIR, exist_ok=True)
-os.makedirs(ARCHIVE_DIR, exist_ok=True)
 
 log_file = os.path.join(LOG_DIR, 'app.log')
 
-class ArchiveHandler(TimedRotatingFileHandler):
-    def doRollover(self):
-        super().doRollover()
-        for filename in os.listdir(LOG_DIR):
-            if filename.startswith('app.log.') and not filename.endswith('.log'):
-                src = os.path.join(LOG_DIR, filename)
-                dst = os.path.join(ARCHIVE_DIR, filename)
-                if os.path.exists(src):
-                    os.rename(src, dst)
-
 logger = logging.getLogger('app_logger')
 logger.setLevel(logging.INFO)
-handler = ArchiveHandler(log_file, when='midnight', backupCount=7)
+handler = TimedRotatingFileHandler(log_file, when='midnight', backupCount=7)
 formatter = logging.Formatter('%(asctime)s %(levelname)s %(message)s')
 handler.setFormatter(formatter)
 logger.addHandler(handler)
@@ -54,6 +42,7 @@ class TokenRequest(BaseModel):
 
 @app.post('/api/get-livekit-token')
 async def get_livekit_token(request: TokenRequest):
+    logger.info(f"Token request received: identity={request.identity}, room={request.room}")
     try:
         token = api.AccessToken() \
             .with_identity(request.identity) \
@@ -62,6 +51,7 @@ async def get_livekit_token(request: TokenRequest):
                 room=request.room,
             )) \
             .to_jwt()
+        logger.info(f"Token generated successfully for identity={request.identity}, room={request.room}")
         return {"token": token}
     except Exception as e:
         logger.error(f"Token generation failed: {str(e)}")

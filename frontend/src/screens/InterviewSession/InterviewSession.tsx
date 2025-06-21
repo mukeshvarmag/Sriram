@@ -1,7 +1,6 @@
 import React, { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { LiveKitRoom, RoomAudioRenderer, TrackToggle } from "@livekit/components-react";
-import { Track } from "livekit-client";
+import { LiveKitRoom, RoomAudioRenderer, useLocalParticipant } from "@livekit/components-react";
 import { Button } from "../../components/ui/button";
 import { Dialog, DialogContent, DialogClose } from "../../components/ui/dialog";
 import { MicIcon, MicOffIcon } from "lucide-react";
@@ -49,6 +48,34 @@ export const InterviewSession = (): JSX.Element => {
       </div>
     );
   }
+
+  // MicToggleButton must be inside LiveKitRoom context
+  const MicToggleButton = () => {
+    const { localParticipant } = useLocalParticipant();
+    const [micOn, setMicOn] = useState(true);
+
+    const handleMicToggle = () => {
+      if (micOn) {
+        localParticipant.setMicrophoneEnabled(false);
+      } else {
+        localParticipant.setMicrophoneEnabled(true);
+      }
+      setMicOn(!micOn);
+    };
+
+    return (
+      <div className="mt-8">
+        <button
+          onClick={handleMicToggle}
+          className={`w-20 h-20 rounded-full flex items-center justify-center text-white text-lg ${micOn ? "bg-[#2F2F2F]" : "bg-red-600"}`}
+          aria-label={micOn ? "Mute microphone" : "Unmute microphone"}
+        >
+          {micOn ? <MicIcon className="w-6 h-6" /> : <MicOffIcon className="w-6 h-6" />}
+          <span className="ml-2">{micOn ? "Mic On" : "Mic Off"}</span>
+        </button>
+      </div>
+    );
+  };
 
   return (
     <div className="min-h-screen bg-[#1C1C1C] text-white flex flex-col">
@@ -113,20 +140,8 @@ export const InterviewSession = (): JSX.Element => {
           audio={true}
           className="w-full h-full flex flex-col items-center justify-center"
         >
-          {/* Audio renderer for all room audio */}
           <RoomAudioRenderer />
-
-          {/* Mic toggle button */}
-          <div className="mt-8">
-            <TrackToggle
-              source={Track.Source.Microphone}
-              showIcon={true}
-              className="w-14 h-14 rounded-full bg-[#2F2F2F] flex items-center justify-center text-white text-lg"
-            >
-              <MicIcon className="w-6 h-6" />
-              <span className="ml-2">Mic</span>
-            </TrackToggle>
-          </div>
+          <MicToggleButton />
         </LiveKitRoom>
       </main>
 

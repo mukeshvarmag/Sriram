@@ -9,10 +9,12 @@ from livekit.plugins import (
     noise_cancellation,
     silero,
 )
-from livekit.plugins.turn_detector.multilingual import MultilingualModel
 
 load_dotenv()
+import logging
 
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 class Assistant(Agent):
     def __init__(self) -> None:
@@ -21,10 +23,11 @@ class Assistant(Agent):
         Stay in character, ask thoughtful questions, and respond naturally.
         Do not reveal you are AI. Speak with curiosity and confidence.
         """)
-
+        logger.info("Assistant initialized with interview instructions.")
 
 
 async def entrypoint(ctx: agents.JobContext):
+    logger.info(f"Entrypoint started for room: {ctx.room}")
     session = AgentSession(
         stt=deepgram.STT(model="nova-3", language="multi"),
         llm=openai.LLM(model="gpt-4o-mini"),
@@ -37,19 +40,17 @@ async def entrypoint(ctx: agents.JobContext):
         room=ctx.room,
         agent=Assistant(),
         room_input_options=RoomInputOptions(
-            # LiveKit Cloud enhanced noise cancellation
-            # - If self-hosting, omit this parameter
-            # - For telephony applications, use `BVCTelephony` for best results
             noise_cancellation=noise_cancellation.BVC(),
         ),
     )
+    logger.info(f"Session started for room: {ctx.room}")
 
     await ctx.connect()
 
     await session.generate_reply(
         instructions="Greet the user and offer your assistance."
     )
-
+    logger.info(f"Greeting reply generated for room: {ctx.room}")
 
 if __name__ == "__main__":
     agents.cli.run_app(agents.WorkerOptions(entrypoint_fnc=entrypoint))
