@@ -1,6 +1,11 @@
 import React, { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { LiveKitRoom, RoomAudioRenderer, useLocalParticipant } from "@livekit/components-react";
+import {
+  LiveKitRoom,
+  RoomAudioRenderer,
+  useLocalParticipant,
+  useRoomContext,
+} from "@livekit/components-react";
 import { Button } from "../../components/ui/button";
 import { Dialog, DialogContent, DialogClose } from "../../components/ui/dialog";
 import { MicIcon, MicOffIcon } from "lucide-react";
@@ -8,12 +13,41 @@ import { MicIcon, MicOffIcon } from "lucide-react";
 const BACKEND_URL = import.meta.env.VITE_BACKEND_URL || "http://localhost:3001";
 const LIVEKIT_URL = import.meta.env.VITE_LIVEKIT_URL || "ws://localhost:7880";
 
-export const InterviewSession = (): JSX.Element => {
+// Custom hook for subscribing to LiveKit data messages
+function useLivekitDataMessages(setMessages, setTranscript) {
+  const room = useRoomContext();
+  useEffect(() => {
+    if (!room) return;
+    const handler = (payload, participant) => {
+      try {
+        const msg = JSON.parse(new TextDecoder().decode(payload));
+        if (msg.transcript) setTranscript(msg.transcript);
+        if (msg.reply) setMessages(prev => [
+          ...prev,
+          { role: "assistant", content: msg.reply }
+        ]);
+      } catch {}
+    };
+    room.on("dataReceived", handler);
+    return () => room.off("dataReceived", handler);
+  }, [room, setMessages, setTranscript]);
+}
+
+// Listener component to be rendered inside LiveKitRoom
+function LivekitMessageListener({ setMessages, setTranscript }) {
+  useLivekitDataMessages(setMessages, setTranscript);
+  return null; // no UI
+}
+
+export const InterviewSession = () => {
   const navigate = useNavigate();
-  const [token, setToken] = useState<string | null>(null);
+  const [token, setToken] = useState(null);
   const [showLeaveDialog, setShowLeaveDialog] = useState(false);
   const [messages, setMessages] = useState([
-    { role: "assistant", content: "Hello! I'm Sam, and I'll be conducting your interview today. How are you doing?" }
+    {
+      role: "assistant",
+      content: "Hello! I'm Sam, and I'll be conducting your interview today. How are you doing?",
+    },
   ]);
   const [transcript, setTranscript] = useState("");
   const [isProcessing, setIsProcessing] = useState(false);
@@ -67,10 +101,16 @@ export const InterviewSession = (): JSX.Element => {
       <div className="mt-8">
         <button
           onClick={handleMicToggle}
-          className={`w-20 h-20 rounded-full flex items-center justify-center text-white text-lg ${micOn ? "bg-[#2F2F2F]" : "bg-red-600"}`}
+          className={`w-20 h-20 rounded-full flex items-center justify-center text-white text-lg ${
+            micOn ? "bg-[#2F2F2F]" : "bg-red-600"
+          }`}
           aria-label={micOn ? "Mute microphone" : "Unmute microphone"}
         >
-          {micOn ? <MicIcon className="w-6 h-6" /> : <MicOffIcon className="w-6 h-6" />}
+          {micOn ? (
+            <MicIcon className="w-6 h-6" />
+          ) : (
+            <MicOffIcon className="w-6 h-6" />
+          )}
           <span className="ml-2">{micOn ? "Mic On" : "Mic Off"}</span>
         </button>
       </div>
@@ -142,6 +182,8 @@ export const InterviewSession = (): JSX.Element => {
         >
           <RoomAudioRenderer />
           <MicToggleButton />
+          {/* 👇 Now listener runs inside the context */}
+          <LivekitMessageListener setMessages={setMessages} setTranscript={setTranscript} />
         </LiveKitRoom>
       </main>
 
