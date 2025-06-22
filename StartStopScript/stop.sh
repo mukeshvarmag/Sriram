@@ -1,6 +1,9 @@
 #!/bin/bash
-echo "Stopping Flask (python) server..."
-pkill -f "python3 main.py"
-echo "Stopping React (npm) server..."
-pkill -f "npm run dev"
-echo "All servers stopped."
+
+echo "Stopping backend (assistant.py)..."
+taskkill //IM python.exe //F 2> /dev/null
+
+echo "Stopping all node (npm run dev) processes..."
+taskkill //IM node.exe //F 2> /dev/null
+
+echo "All services stopped."
