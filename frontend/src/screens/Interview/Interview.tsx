@@ -7,8 +7,9 @@ export const Interview = (): JSX.Element => {
   const navigate = useNavigate();
 
   const handleStartInterview = () => {
-  window.location.href = 'http://localhost:3000/#cam=0&mic=1&screen=0&video=0&audio=1&chat=1&theme_color=cyan';
-};
+  const url = import.meta.env.VITE_INTERVIEW_URL;
+  window.location.href = url;
+}
 
 
   return (
